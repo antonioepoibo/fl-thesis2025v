@@ -3,6 +3,7 @@
 from flwr.common import Context, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.strategy import FedAvg
+from thesis_app.my_strategy import CustomFedAvg
 from thesis_app.task import Net, get_weights
 
 
@@ -12,11 +13,13 @@ def server_fn(context: Context):
     fraction_fit = context.run_config["fraction-fit"]
 
     # Initialize model parameters
-    ndarrays = get_weights(Net())
-    parameters = ndarrays_to_parameters(ndarrays)
+    weights = get_weights(Net())
+    shapes = [w.shape for w in weights]
+    parameters = ndarrays_to_parameters(weights)
 
     # Define strategy
-    strategy = FedAvg(
+    strategy = CustomFedAvg(
+        shapes=shapes,
         fraction_fit=fraction_fit,
         fraction_evaluate=1.0,
         min_available_clients=2,
