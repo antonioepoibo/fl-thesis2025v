@@ -60,12 +60,11 @@ class CustomFedAvg(FedAvg):
                     # Reshape and print shape
                     for j, tensor in enumerate(decrypted):
                         reshaped = np.array(tensor).reshape(self.shapes[j])
-                        if j == 0:
-                            print(f"  - Tensor {j} first 10 values: {reshaped.flatten()[:10]}")
+                        print(f"  - Tensor {j} shape: {reshaped.shape}")
                 except Exception as e:
                     print(f"  - Error decrypting tensors: {e}")
             else:
                 print(f"  - Skipping non-encrypted tensors from client")
 
     def configure_evaluate(self, server_round: int, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy | EvaluateIns]]:
-        return []
+        return super().configure_evaluate(server_round, parameters, client_manager)

@@ -4,6 +4,7 @@ from flwr.common import Context, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.strategy import FedAvg
 from thesis_app.my_strategy import CustomFedAvg
+from thesis_app.FedAvgEnc import FedAvgEnc
 from thesis_app.task import Net, get_weights
 
 
@@ -18,7 +19,7 @@ def server_fn(context: Context):
     parameters = ndarrays_to_parameters(weights)
 
     # Define strategy
-    strategy = CustomFedAvg(
+    strategy = FedAvgEnc(
         shapes=shapes,
         fraction_fit=fraction_fit,
         fraction_evaluate=1.0,
