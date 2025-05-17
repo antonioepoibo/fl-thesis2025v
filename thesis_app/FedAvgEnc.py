@@ -73,32 +73,40 @@ class FedAvgEnc(FedAvg):
         print(f"\n[Server] aggregate_fit round {server_round}")
 
         if not results:
-            return None
+            return None, {}
+        if not self.accept_failures and failures:
+            return None, {}
 
         # Step 1: Deserialize encrypted parameters from each client
         all_encrypted = []
+        sample_counts = []
+
         for _, fit_res in results:
             if fit_res.parameters.tensor_type != "tenseal.ckks":
                 continue
             encrypted = deserialize_encrypted_tensors(server_context, fit_res.parameters.tensors)
             all_encrypted.append(encrypted)
+            sample_counts.append(fit_res.num_examples)
 
         if not all_encrypted:
             print("[Server] No usable encrypted tensors.")
             return None
 
-        # Step 2: Homomorphic sum of encrypted tensors
+        # Step 2: Compute weighted average
+        total_examples = sum(sample_counts)
         num_tensors = len(all_encrypted[0])
-        summed = []
+        averaged = []
 
         for i in range(num_tensors):
-            acc = all_encrypted[0][i]
-            for tensors in all_encrypted[1:]:
-                acc += tensors[i]  # Homomorphic addition
-            summed.append(acc)
+            # Start with a zero-weighted copy of the first tensor
+            weighted_sum = all_encrypted[0][i] * (sample_counts[0] / total_examples)
+            for j in range(1, len(all_encrypted)):
+                weight = sample_counts[j] / total_examples
+                weighted_sum += all_encrypted[j][i] * weight
+            averaged.append(weighted_sum)
 
-        # Step 3: Serialize summed encrypted tensors
-        serialized = serialize_encrypted_tensors(summed)
+        # Step 3: Serialize averaged encrypted tensors
+        serialized = serialize_encrypted_tensors(averaged)
 
         # Step 4: Package into FL Parameters
         parameters_aggregated = Parameters(
@@ -106,18 +114,19 @@ class FedAvgEnc(FedAvg):
             tensor_type="tenseal.ckks"
         )
 
-        print("[Server] Encrypted parameters summed and returned.")
-        self.print_parameters(results, failures, summed)
+        print("[Server] Encrypted parameters weighted-averaged and returned.")
+        self.print_parameters(results, failures, summed=averaged)
 
         # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
         if self.fit_metrics_aggregation_fn:
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
-        elif server_round == 1:  # Only log this warning once
+        elif server_round == 1:
             log(WARNING, "No fit_metrics_aggregation_fn provided")
 
         return parameters_aggregated, metrics_aggregated
+
 
     
 
