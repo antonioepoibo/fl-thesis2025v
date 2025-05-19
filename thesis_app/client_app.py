@@ -1,5 +1,5 @@
 import torch
-
+import time
 from flwr.client import ClientApp, NumPyClient,Client
 from flwr.common import Context
 from thesis_app.task import Net, get_weights, load_data, set_weights, test, train
@@ -16,7 +16,7 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
-from thesis_app.create_enc_context import encrypt_tensors, serialize_encrypted_tensors, load_context
+from thesis_app.create_enc_context_CKKS import encrypt_tensors, serialize_encrypted_tensors, load_context
 
 
 class FlowerClient(Client):
@@ -59,17 +59,17 @@ class FlowerClient(Client):
 
     def fit(self, ins: FitIns) -> FitRes:
         print("[Client] fit CALLED")
-
+        
         # Step 1: Deserialize parameters and update local model
         parameters_original = ins.parameters
         ndarrays_original = parameters_to_ndarrays(parameters_original)
         
 
         set_weights(self.net, ndarrays_original)
-
+        start_time = time.time()
         # Step 2: Train the model locally
         train(self.net, self.trainloader, epochs=1, device=self.device)
-
+        train_time = time.time() - start_time
         # Step 3: Get updated model weights
         ndarrays_updated = get_weights(self.net)
         print(f"[Client] Updated model weights (first 10 values of first tensor): {ndarrays_updated[0].flatten()[:10]}")
@@ -92,7 +92,7 @@ class FlowerClient(Client):
             status=status,
             parameters=parameters_updated,
             num_examples=len(self.trainloader),
-            metrics={},
+            metrics={"train_time": train_time},
         )
 
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:

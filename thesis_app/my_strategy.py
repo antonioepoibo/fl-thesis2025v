@@ -5,7 +5,7 @@ from flwr.server.client_proxy import ClientProxy
 from typing import List, Tuple, Optional
 import numpy as np
 
-from thesis_app.create_enc_context import load_context, decrypt_tensors, deserialize_encrypted_tensors
+from thesis_app.create_enc_context_CKKS import load_context, decrypt_tensors, deserialize_encrypted_tensors
 import tenseal as ts
 
 # Load your TenSEAL context (with secret key for decryption)

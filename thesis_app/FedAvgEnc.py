@@ -8,7 +8,7 @@ from flwr.common.logger import log
 from logging import WARNING
 
 
-from thesis_app.create_enc_context import load_context, decrypt_tensors, serialize_encrypted_tensors, deserialize_encrypted_tensors
+from thesis_app.create_enc_context_CKKS import load_context, decrypt_tensors, serialize_encrypted_tensors, deserialize_encrypted_tensors
 import tenseal as ts
 
 # Load your TenSEAL context (with secret key for decryption)
