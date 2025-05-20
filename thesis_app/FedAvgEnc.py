@@ -6,7 +6,7 @@ import numpy as np
 from flwr.server.client_manager import ClientManager
 from flwr.common.logger import log
 from logging import WARNING
-
+import time
 
 from thesis_app.create_enc_context_CKKS import load_context, decrypt_tensors, serialize_encrypted_tensors, deserialize_encrypted_tensors
 import tenseal as ts
@@ -18,6 +18,7 @@ server_context = load_context("./context_data/ckks.context")
 class FedAvgEnc(FedAvg):
     def __init__(self, shapes, *args, **kwargs):
         self.shapes = shapes
+        self._fit_start_times = {}
         print(f"[Server] FedAvgEnc initialized")
         super().__init__(*args, **kwargs)
 
@@ -62,6 +63,16 @@ class FedAvgEnc(FedAvg):
                 print(f"[Server] Error decrypting summed tensors: {e}")
 
 
+    def configure_fit(self, server_round, parameters, client_manager):
+        # Get the list of (ClientProxy, FitIns) from parent strategy
+        instructions = super().configure_fit(server_round, parameters, client_manager)
+
+        # Store send time for each client
+        now = time.time()
+        for client_proxy, _ in instructions:
+            self._fit_start_times[client_proxy.cid] = now
+
+        return instructions
 
 
     def aggregate_fit(
@@ -71,11 +82,20 @@ class FedAvgEnc(FedAvg):
         failures,
     ) -> Optional[Parameters]: 
         print(f"\n[Server] aggregate_fit round {server_round}")
-
+        
         if not results:
             return None, {}
         if not self.accept_failures and failures:
             return None, {}
+        receive_time = time.time()
+        comm_durations = []
+
+        for client_proxy, fit_res in results:
+            cid = client_proxy.cid
+            if cid in self._fit_start_times:
+                start_time = self._fit_start_times[cid]
+                round_trip = receive_time - start_time
+                comm_durations.append(round_trip)
 
         # Step 1: Deserialize encrypted parameters from each client
         all_encrypted = []
@@ -124,6 +144,8 @@ class FedAvgEnc(FedAvg):
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
         elif server_round == 1:
             log(WARNING, "No fit_metrics_aggregation_fn provided")
+        avg_round_trip = sum(comm_durations) / len(comm_durations) if comm_durations else 0.0
+        metrics_aggregated["avg_round_trip"] = avg_round_trip
 
         return parameters_aggregated, metrics_aggregated
 

@@ -8,6 +8,9 @@ from thesis_app.my_strategy import CustomFedAvg
 from thesis_app.FedAvgEnc import FedAvgEnc
 from thesis_app.task import Net, get_weights
 
+from typing import List, Tuple
+from flwr.common import Metrics
+
 def average_metric(metrics: List[Tuple[int, Metrics]], key: str) -> float:
     """Compute the average of a specific metric key."""
     values = [m[key] for _, m in metrics if key in m]
@@ -15,18 +18,22 @@ def average_metric(metrics: List[Tuple[int, Metrics]], key: str) -> float:
         return 0.0
     return sum(values) / len(values)
 
-def aggregate_fit_metrics(metrics: List[Tuple[int, Metrics]]) -> Metrics:
+
+def fit_metrics_aggregation_fn(metrics: List[Tuple[int, Metrics]]) -> Metrics:
     """Aggregate fit metrics from all clients."""
     print("[Server] Aggregating client fit metrics...")
 
     if not metrics:
         return {}
 
-    avg_train_time = average_metric(metrics, "train_time")
-
     return {
-        "avg_train_time": avg_train_time
+        "avg_train_time": average_metric(metrics, "train_time"),
+        "avg_memory_usage_mb": average_metric(metrics, "memory_usage_mb"),
+        "avg_cpu_percent": average_metric(metrics, "cpu_percent"),
+        "avg_gpu_memory_mb": average_metric(metrics, "gpu_memory_mb"),
+        "avg_client_fit_called": average_metric(metrics, "fit_called"),
     }
+
 
 def server_fn(context: Context):
     # Read from config
@@ -45,7 +52,7 @@ def server_fn(context: Context):
         fraction_evaluate=1.0,
         min_available_clients=2,
         initial_parameters=parameters,
-        fit_metrics_aggregation_fn=aggregate_fit_metrics,
+        fit_metrics_aggregation_fn=fit_metrics_aggregation_fn,
     )
     config = ServerConfig(num_rounds=num_rounds)
 

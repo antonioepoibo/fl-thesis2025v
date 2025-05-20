@@ -1,5 +1,6 @@
 import torch
 import time
+import psutil
 from flwr.client import ClientApp, NumPyClient,Client
 from flwr.common import Context
 from thesis_app.task import Net, get_weights, load_data, set_weights, test, train
@@ -59,41 +60,70 @@ class FlowerClient(Client):
 
     def fit(self, ins: FitIns) -> FitRes:
         print("[Client] fit CALLED")
-        
+        fit_called=time.time()
         # Step 1: Deserialize parameters and update local model
         parameters_original = ins.parameters
         ndarrays_original = parameters_to_ndarrays(parameters_original)
-        
-
         set_weights(self.net, ndarrays_original)
+
+        # Step 2: Initialize monitoring tools
+        process = psutil.Process()
+        process.cpu_percent(None)  # Prime CPU counter
+
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+        # Step 3: Train the model locally
         start_time = time.time()
-        # Step 2: Train the model locally
-        train(self.net, self.trainloader, epochs=1, device=self.device)
+        train(self.net, self.trainloader, epochs=self.local_epochs, device=self.device)
         train_time = time.time() - start_time
-        # Step 3: Get updated model weights
+
+        # Step 4: Collect system metrics
+        cpu_percent = process.cpu_percent(interval=None)  # % CPU used since last call
+        memory_usage = process.memory_info().rss / 1024 / 1024  # in MB
+        normalized_cpu = cpu_percent / psutil.cpu_count()
+
+
+        if torch.cuda.is_available():
+            gpu_memory = torch.cuda.max_memory_allocated() / 1024 / 1024  # in MB
+        else:
+            gpu_memory = 0.0
+
+        # Step 5: Get updated model weights
         ndarrays_updated = get_weights(self.net)
         print(f"[Client] Updated model weights (first 10 values of first tensor): {ndarrays_updated[0].flatten()[:10]}")
-        # Step 4: Flatten and encrypt updated weights using TenSEAL
+
+        # Step 6: Flatten and encrypt updated weights
         flattened_ndarrays = [arr.flatten() for arr in ndarrays_updated]
         encrypted_vectors = encrypt_tensors(self.context, flattened_ndarrays)
 
-        # Step 5: Serialize encrypted vectors
+        # Step 7: Serialize encrypted vectors
         serialized = serialize_encrypted_tensors(encrypted_vectors)
 
-        # Step 6: Wrap in FLWR Parameters object with correct tensor_type
+        # Step 8: Wrap in Parameters and return FitRes
         parameters_updated = Parameters(
             tensors=serialized,
             tensor_type="tenseal.ckks"
         )
 
-        # Step 7: Build and return FitRes
-        status = Status(code=Code.OK, message="Encrypted model update")
+        metrics = {
+            "fit_called":fit_called,
+            "train_time": train_time,
+            "memory_usage_mb": memory_usage,
+            "cpu_percent": normalized_cpu,
+            "gpu_memory_mb": gpu_memory,
+        }
+
+        print(f"[Client] Fit metrics: {metrics}")
+
         return FitRes(
-            status=status,
+            status=Status(code=Code.OK, message="Encrypted model update"),
             parameters=parameters_updated,
             num_examples=len(self.trainloader),
-            metrics={"train_time": train_time},
+            metrics=metrics,
         )
+
+
 
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
 
