@@ -9,6 +9,10 @@ from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Normalize, ToTensor
+from flwr.common import Parameters
+import numpy as np
+import tenseal as ts
+
 
 
 class Net(nn.Module):
@@ -30,6 +34,29 @@ class Net(nn.Module):
         x = F.relu(self.fc1(x))    # fc1 + relu
         x = self.fc2(x)            # output layer (no activation, logits)
         return x
+    
+
+def get_transforms():
+    """Get the transforms for CIFAR10 dataset."""
+    pytorch_transforms = Compose(
+        [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    )
+
+    def apply_transforms(batch):
+        """Apply transforms to the partition from FederatedDataset."""
+        batch["img"] = [pytorch_transforms(img) for img in batch["img"]]
+        return batch
+    
+    return apply_transforms
+
+def get_weights(net: nn.Module):
+    """Return model weights as list of numpy arrays."""
+    return [val.cpu().numpy() for _, val in net.state_dict().items()]
+
+def get_weights_shapes(net: nn.Module):
+    """Return the shapes of the model weights."""
+    return [val.shape for _, val in net.state_dict().items()]
+
 
 fds = None  # Cache FederatedDataset
 
@@ -47,16 +74,9 @@ def load_data(partition_id: int, num_partitions: int):
     partition = fds.load_partition(partition_id)
     # Divide data on each node: 80% train, 20% test
     partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
-    pytorch_transforms = Compose(
-        [ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
-    )
+    
 
-    def apply_transforms(batch):
-        """Apply transforms to the partition from FederatedDataset."""
-        batch["img"] = [pytorch_transforms(img) for img in batch["img"]]
-        return batch
-
-    partition_train_test = partition_train_test.with_transform(apply_transforms)
+    partition_train_test = partition_train_test.with_transform(get_transforms())
     trainloader = DataLoader(partition_train_test["train"], batch_size=32, shuffle=True)
     testloader = DataLoader(partition_train_test["test"], batch_size=32)
     return trainloader, testloader
@@ -99,9 +119,6 @@ def test(net, testloader, device):
     loss = loss / len(testloader)
     return loss, accuracy
 
-
-def get_weights(net):
-    return [val.cpu().numpy() for _, val in net.state_dict().items()]
 
 
 def set_weights(net, parameters):

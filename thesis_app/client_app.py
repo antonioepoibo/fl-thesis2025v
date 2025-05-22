@@ -3,7 +3,8 @@ import time
 import psutil
 from flwr.client import ClientApp, NumPyClient,Client
 from flwr.common import Context
-from thesis_app.task import Net, get_weights, load_data, set_weights, test, train
+from thesis_app.task import Net, get_weights,get_weights_shapes, load_data, set_weights, test, train
+from thesis_app.comunication_utils import weights_to_parameters, serialized_to_weights
 from flwr.common import (
     Parameters,
     Code,
@@ -17,7 +18,6 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
-from thesis_app.create_enc_context_CKKS import encrypt_tensors, serialize_encrypted_tensors, load_context
 
 
 class FlowerClient(Client):
@@ -28,30 +28,14 @@ class FlowerClient(Client):
         self.local_epochs = local_epochs
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.net.to(self.device)
-        self.context = load_context("./context_data/ckks.context")
 
     def get_parameters(self, ins: GetParametersIns) -> GetParametersRes:
         print("[Client] get_parameters CALLED")
-        # Step 1: Get model weights as list of np.ndarray
-        ndarrays: List[np.ndarray] = get_weights(self.net)
-        # for i, arr in enumerate(ndarrays):
-        #     print(f"  - Tensor {i}: shape={arr.shape}, dtype={arr.dtype}")
-        #     print(arr)
 
-        # Step 2: Flatten and encrypt model weights using TenSEAL
-        flattened_ndarrays = [arr.flatten() for arr in ndarrays]  # Flatten each tensor
-        encrypted_vectors = encrypt_tensors(self.context, flattened_ndarrays)
+        weights = get_weights(self.net)
 
-        # Step 3: Serialize the encrypted vectors
-        serialized = serialize_encrypted_tensors(encrypted_vectors)
+        parameters=weights_to_parameters(weights)
 
-        # Step 4: Wrap in FLWR Parameters object
-        parameters = Parameters(
-            tensors=serialized,
-            tensor_type="tenseal.ckks"
-        )
-
-        # Step 5: Return result
         status = Status(code=Code.OK, message="Success")
         return GetParametersRes(
             status=status,
@@ -60,11 +44,10 @@ class FlowerClient(Client):
 
     def fit(self, ins: FitIns) -> FitRes:
         print("[Client] fit CALLED")
-        fit_called=time.time()
         # Step 1: Deserialize parameters and update local model
-        parameters_original = ins.parameters
-        ndarrays_original = parameters_to_ndarrays(parameters_original)
-        set_weights(self.net, ndarrays_original)
+        shapes = get_weights_shapes(self.net)
+        weights=serialized_to_weights(ins.parameters,shapes)
+        set_weights(self.net, weights)
 
         # Step 2: Initialize monitoring tools
         process = psutil.Process()
@@ -91,23 +74,12 @@ class FlowerClient(Client):
 
         # Step 5: Get updated model weights
         ndarrays_updated = get_weights(self.net)
-        print(f"[Client] Updated model weights (first 10 values of first tensor): {ndarrays_updated[0].flatten()[:10]}")
+        #print(f"[Client] Updated model weights (first 10 values of first tensor): {ndarrays_updated[0].flatten()[:10]}")
 
-        # Step 6: Flatten and encrypt updated weights
-        flattened_ndarrays = [arr.flatten() for arr in ndarrays_updated]
-        encrypted_vectors = encrypt_tensors(self.context, flattened_ndarrays)
-
-        # Step 7: Serialize encrypted vectors
-        serialized = serialize_encrypted_tensors(encrypted_vectors)
-
-        # Step 8: Wrap in Parameters and return FitRes
-        parameters_updated = Parameters(
-            tensors=serialized,
-            tensor_type="tenseal.ckks"
-        )
+        # Step 6: Encrypt and serialize updated model weights
+        parameters_updated = weights_to_parameters(ndarrays_updated)
 
         metrics = {
-            "fit_called":fit_called,
             "train_time": train_time,
             "memory_usage_mb": memory_usage,
             "cpu_percent": normalized_cpu,
@@ -126,7 +98,7 @@ class FlowerClient(Client):
 
 
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-
+        print("[Client] evaluate CALLED")
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
         ndarrays_original = parameters_to_ndarrays(parameters_original)
